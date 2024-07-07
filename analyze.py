@@ -5,7 +5,9 @@ import collections
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import binomtest
+from scipy.stats import poisson
 import scipy
+import numpy as np
 
 def preprocess_pdfs():
     lines = []
@@ -65,6 +67,7 @@ def denorm_data():
     df["inspections"] = ((17*df["FSH"])-df["TIS"])/1600
     df["CSH"] = (df["TIS"]+df["inspections"]*100)/2
     df["FSH_Ratio"] = df["FSH"]/df["TIS"]
+    df["Failure_Prob"] = 1-np.exp(-df["FSH"]/374901)
     return df
 
 def failure_cdf():
@@ -75,6 +78,16 @@ def failure_cdf():
         # df = df[df[X_AXIS] >= 5000]
         sns.ecdfplot(data=df, x=X_AXIS, hue="Outcome")
         plt.savefig(f"failure_cdf_{X_AXIS}.pdf", bbox_inches="tight")
+
+def failure_cdf_with_hypothetical():
+    for X_AXIS in ["FSH"]:
+        plt.clf()
+        df = denorm_data()
+        df = df.dropna()
+        # df = df[df[X_AXIS] >= 5000]
+        sns.ecdfplot(data=df, x=X_AXIS, hue="Outcome")
+        sns.ecdfplot(data=df, x=X_AXIS, weights="Failure_Prob", label="Hypothetical", color="red")
+        plt.savefig(f"failure_cdf_{X_AXIS}_with_hypothetical.pdf", bbox_inches="tight")
 
 def failure_rate():
     for X_AXIS in X_AXES:
@@ -100,6 +113,28 @@ def failure_rate():
         plt.xlabel(X_AXIS)
         plt.savefig(f"failure_rate_{X_AXIS}.pdf", bbox_inches="tight")
 
+def optimize_lambda():
+    X_AXIS="FSH"
+    # Determine the optimal lambda for the poisson distribution of failure rates
+    df = denorm_data()
+    df = df.dropna()
+    def log_likelihood(test_mean):
+        test_lambda = 1/test_mean
+        df["failure_prob"] = 1-np.exp(-test_lambda*df[X_AXIS])
+        df["likelihood"] = np.abs(df["Outcome"]-df["failure_prob"])
+        return np.log(df["likelihood"].astype(float)).sum()
+    # Maximize log_likelihood in the range 1 to 15000
+    best_likelihood = -1000000000
+    best_likelihood_mean = 0
+    for test_mean in range(1, 1000000, 100):
+        print(test_mean)
+        log_likelihood_test = log_likelihood(test_mean)
+        if log_likelihood_test > best_likelihood:
+            best_likelihood = log_likelihood_test
+            best_likelihood_mean = test_mean
+    print(best_likelihood, best_likelihood_mean)
+    # print(df)
+
 def counts():
     for X_AXIS in X_AXES:
         for outcome in [True, False]:
@@ -113,13 +148,16 @@ def counts():
             grouped = df.groupby(["Bucket", "Outcome"]).Model.count().reset_index()
             sns.barplot(data=grouped, x="Bucket", y="Model", hue="Outcome")
             plt.xticks(rotation=45)
+            plt.xlabel(X_AXIS)
             plt.savefig(f"counts_{X_AXIS}_{outcome}.pdf", bbox_inches="tight")
     
 
 if __name__ == "__main__":
-    print(denorm_data())
-    # preprocess_pdfs()
+    optimize_lambda()
+    # print(denorm_data())
+    # # preprocess_pdfs()
     failure_rate()
     counts()
     failure_cdf()
+    failure_cdf_with_hypothetical()
     # print(denorm_data())
